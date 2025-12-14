@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Arquivo: modelo/AlunoDAO.php
 
 require_once 'Connection.php';

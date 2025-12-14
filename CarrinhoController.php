@@ -1,8 +1,22 @@
 <?php
-session_start();
+/**
+ * CarrinhoController - Gerenciador de Carrinho de Planos e Produtos
+ * 
+ * Responsável por:
+ * - Adicionar planos ao carrinho via AJAX
+ * - Gerenciar sessão de carrinho
+ * - Integração com produtos via localStorage (frontend)
+ */
 
+// Inicia sessão
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Configuração de headers para AJAX
 header('Content-Type: application/json');
 
+// Verifica método de requisição
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['sucesso' => false, 'mensagem' => 'Método não permitido']);
     exit;
@@ -32,16 +46,8 @@ switch ($data['action']) {
         adicionarPlano($data);
         break;
     
-    case 'adicionar_produto':
-        adicionarProduto($data);
-        break;
-    
     case 'remover_plano':
         removerPlano($data);
-        break;
-    
-    case 'remover_item':
-        removerItem($data);
         break;
     
     case 'limpar_carrinho':
@@ -61,228 +67,46 @@ switch ($data['action']) {
  * Adiciona um plano ao carrinho
  */
 function adicionarPlano($data) {
-    // Garante que o carrinho está inicializado corretamente
-    if (!isset($_SESSION['carrinho_planos']) || !is_array($_SESSION['carrinho_planos'])) {
-        $_SESSION['carrinho_planos'] = [
-            'itens' => [],
-            'subtotal' => 0
-        ];
-    }
-    
-    if (!isset($_SESSION['carrinho_planos']['itens']) || !is_array($_SESSION['carrinho_planos']['itens'])) {
-        $_SESSION['carrinho_planos']['itens'] = [];
-    }
-    
-    // LIMPA ITENS INVÁLIDOS antes de verificar
-    $itensValidos = [];
-    foreach ($_SESSION['carrinho_planos']['itens'] as $item) {
-        if (is_array($item) && isset($item['tipo']) && isset($item['id']) && isset($item['nome']) && 
-            !empty($item['id']) && !empty($item['nome'])) {
-            $itensValidos[] = $item;
-        }
-    }
-    $_SESSION['carrinho_planos']['itens'] = $itensValidos;
-    
-    // Verifica se já existe um plano VÁLIDO no carrinho (apenas 1 plano permitido)
-    $temPlano = false;
-    $indexPlanoExistente = -1;
-    
-    foreach ($_SESSION['carrinho_planos']['itens'] as $index => $item) {
-        // Verifica se é realmente um item válido com tipo plano
-        if (is_array($item) && 
-            isset($item['tipo']) && 
-            $item['tipo'] === 'plano' && 
-            isset($item['id']) && 
-            !empty($item['id']) &&
-            isset($item['nome']) &&
-            !empty($item['nome'])) {
-            $temPlano = true;
-            $indexPlanoExistente = $index;
-            break;
-        }
-    }
-    
-    if ($temPlano) {
+    // Valida dados obrigatórios
+    if (!isset($data['id']) || !isset($data['nome']) || !isset($data['preco'])) {
         echo json_encode([
             'sucesso' => false,
-            'mensagem' => 'Você já possui um plano no carrinho. Remova-o antes de adicionar outro.',
-            'plano_existente' => $_SESSION['carrinho_planos']['itens'][$indexPlanoExistente]['nome']
+            'mensagem' => 'Dados do plano incompletos'
         ]);
         return;
     }
-    
-    // Busca dados do plano no banco de dados
-    require_once __DIR__ . '/../config/Connection.php';
-    
-    try {
-        $conn = Connection::getInstance();
-        
-        // Extrai o ID numérico do plano (ex: "plano-sigma" -> busca pelo nome)
-        $planoNome = '';
-        if (isset($data['id'])) {
-            $idMap = [
-                'plano-sigma' => 'Plano Sigma',
-                'plano-alpha' => 'Plano Alpha',
-                'plano-beta' => 'Plano Beta'
-            ];
-            $planoNome = $idMap[$data['id']] ?? '';
-        }
-        
-        if (empty($planoNome)) {
-            echo json_encode([
-                'sucesso' => false,
-                'mensagem' => 'Plano inválido'
-            ]);
-            return;
-        }
-        
-        // Busca o plano no banco (tabela usa nome_planos e valor)
-        $stmt = $conn->prepare("SELECT id_planos, nome_planos, descricao, valor FROM planos WHERE nome_planos = ?");
-        $stmt->execute([$planoNome]);
-        $planoDB = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$planoDB) {
-            echo json_encode([
-                'sucesso' => false,
-                'mensagem' => 'Plano não encontrado no banco de dados. Execute setup_planos.php primeiro.'
-            ]);
-            return;
-        }
-        
-        // Cria item do plano com dados do banco
-        $item = [
-            'id' => $data['id'], // ID original (plano-sigma, etc)
-            'id_planos' => $planoDB['id_planos'], // ID numérico do banco
-            'tipo' => 'plano',
-            'nome' => $planoDB['nome_planos'],
-            'preco' => floatval($planoDB['valor']),
-            'descricao' => $planoDB['descricao'] ?? '',
-            'duracao_meses' => 1,
-            'quantidade' => 1,
-            'subtotal' => floatval($planoDB['valor'])
-        ];
 
-        // Adiciona ao carrinho
-        $_SESSION['carrinho_planos']['itens'][] = $item;
-        
-        // Recalcula o subtotal somando todos os itens
-        $novoSubtotal = 0;
-        foreach ($_SESSION['carrinho_planos']['itens'] as $itemCarrinho) {
-            $novoSubtotal += floatval($itemCarrinho['subtotal']);
-        }
-        $_SESSION['carrinho_planos']['subtotal'] = $novoSubtotal;
-
-        echo json_encode([
-            'sucesso' => true,
-            'mensagem' => 'Plano adicionado ao carrinho com sucesso!',
-            'carrinho' => $_SESSION['carrinho_planos']
-        ]);
-        
-    } catch (Exception $e) {
+    // Verifica se já existe um plano no carrinho (apenas 1 plano permitido)
+    if (count($_SESSION['carrinho_planos']['itens']) > 0) {
         echo json_encode([
             'sucesso' => false,
-            'mensagem' => 'Erro ao buscar plano: ' . $e->getMessage()
-        ]);
-    }
-}
-
-/**
- * Adiciona um produto ao carrinho
- */
-function adicionarProduto($data) {
-    // LIMPA ITENS INVÁLIDOS antes de adicionar
-    if (isset($_SESSION['carrinho_planos']['itens']) && is_array($_SESSION['carrinho_planos']['itens'])) {
-        $itensValidos = [];
-        foreach ($_SESSION['carrinho_planos']['itens'] as $item) {
-            if (is_array($item) && isset($item['tipo']) && isset($item['id']) && isset($item['nome']) && 
-                !empty($item['id']) && !empty($item['nome'])) {
-                $itensValidos[] = $item;
-            }
-        }
-        $_SESSION['carrinho_planos']['itens'] = $itensValidos;
-    }
-    
-    require_once __DIR__ . '/../config/Connection.php';
-    
-    try {
-        $conn = Connection::getInstance();
-        
-        // Busca o produto no banco
-        $stmt = $conn->prepare("SELECT id_produtos, nome_produto, tipo_produto, categoria, preco, quantidade_estoque 
-                                FROM produtos 
-                                WHERE id_produtos = ?");
-        $stmt->execute([$data['id']]);
-        $produtoDB = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$produtoDB) {
-            echo json_encode([
-                'sucesso' => false,
-                'mensagem' => 'Produto n\u00e3o encontrado'
-            ]);
-            return;
-        }
-
-        // Verifica estoque
-        if ($produtoDB['quantidade_estoque'] <= 0) {
-            echo json_encode([
-                'sucesso' => false,
-                'mensagem' => 'Produto sem estoque'
-            ]);
-            return;
-        }
-        
-        // Cria item do produto
-        $quantidade = isset($data['quantidade']) ? intval($data['quantidade']) : 1;
-        $item = [
-            'id' => $produtoDB['id_produtos'],
-            'tipo' => 'produto',
-            'nome' => $produtoDB['nome_produto'],
-            'preco' => floatval($produtoDB['preco']),
-            'descricao' => $produtoDB['tipo_produto'] . ' - ' . $produtoDB['categoria'],
-            'quantidade' => $quantidade,
-            'subtotal' => floatval($produtoDB['preco']) * $quantidade
-        ];
-        
-        // Verifica se o produto já está no carrinho
-        $encontrado = false;
-        foreach ($_SESSION['carrinho_planos']['itens'] as &$itemCarrinho) {
-            if (is_array($itemCarrinho) && 
-                isset($itemCarrinho['tipo']) && 
-                $itemCarrinho['tipo'] === 'produto' && 
-                isset($itemCarrinho['id']) &&
-                $itemCarrinho['id'] == $produtoDB['id_produtos']) {
-                $itemCarrinho['quantidade'] += $quantidade;
-                $itemCarrinho['subtotal'] = $itemCarrinho['preco'] * $itemCarrinho['quantidade'];
-                $encontrado = true;
-                break;
-            }
-        }
-        unset($itemCarrinho); // Importante: libera a referência
-        
-        // Se não encontrou, adiciona novo item
-        if (!$encontrado) {
-            $_SESSION['carrinho_planos']['itens'][] = $item;
-        }
-        
-        // Recalcula o subtotal
-        $novoSubtotal = 0;
-        foreach ($_SESSION['carrinho_planos']['itens'] as $itemCarrinho) {
-            $novoSubtotal += floatval($itemCarrinho['subtotal']);
-        }
-        $_SESSION['carrinho_planos']['subtotal'] = $novoSubtotal;
-        
-        echo json_encode([
-            'sucesso' => true,
-            'mensagem' => 'Produto adicionado ao carrinho!',
+            'mensagem' => 'Você já possui um plano no carrinho. Remova-o antes de adicionar outro.',
             'carrinho' => $_SESSION['carrinho_planos']
         ]);
-        
-    } catch (Exception $e) {
-        echo json_encode([
-            'sucesso' => false,
-            'mensagem' => 'Erro ao adicionar produto: ' . $e->getMessage()
-        ]);
+        return;
     }
+
+    // Cria item do plano
+    $item = [
+        'id' => $data['id'],
+        'tipo' => 'plano',
+        'nome' => $data['nome'],
+        'preco' => floatval($data['preco']),
+        'descricao' => $data['descricao'] ?? '',
+        'beneficios' => $data['beneficios'] ?? [],
+        'quantidade' => 1,
+        'subtotal' => floatval($data['preco'])
+    ];
+
+    // Adiciona ao carrinho
+    $_SESSION['carrinho_planos']['itens'][] = $item;
+    $_SESSION['carrinho_planos']['subtotal'] = floatval($data['preco']);
+
+    echo json_encode([
+        'sucesso' => true,
+        'mensagem' => 'Plano adicionado ao carrinho com sucesso!',
+        'carrinho' => $_SESSION['carrinho_planos']
+    ]);
 }
 
 /**
@@ -315,41 +139,6 @@ function removerPlano($data) {
     echo json_encode([
         'sucesso' => true,
         'mensagem' => 'Plano removido do carrinho',
-        'carrinho' => $_SESSION['carrinho_planos']
-    ]);
-}
-
-/**
- * Remove qualquer item (plano ou produto) do carrinho
- */
-function removerItem($data) {
-    if (!isset($data['id']) || !isset($data['tipo'])) {
-        echo json_encode([
-            'sucesso' => false,
-            'mensagem' => 'ID ou tipo do item não informado'
-        ]);
-        return;
-    }
-
-    $idItem = $data['id'];
-    $tipoItem = $data['tipo'];
-    $novaLista = [];
-    $novoSubtotal = 0;
-
-    // Reconstrói array sem o item removido
-    foreach ($_SESSION['carrinho_planos']['itens'] as $item) {
-        if (!($item['id'] == $idItem && $item['tipo'] == $tipoItem)) {
-            $novaLista[] = $item;
-            $novoSubtotal += $item['subtotal'];
-        }
-    }
-
-    $_SESSION['carrinho_planos']['itens'] = $novaLista;
-    $_SESSION['carrinho_planos']['subtotal'] = $novoSubtotal;
-
-    echo json_encode([
-        'sucesso' => true,
-        'mensagem' => 'Item removido do carrinho',
         'carrinho' => $_SESSION['carrinho_planos']
     ]);
 }

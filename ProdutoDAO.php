@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Salve dentro da pasta: modelo/
 
 // Como estão na mesma pasta (modelo), não precisa de caminho especial

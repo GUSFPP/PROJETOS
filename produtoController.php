@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Salve na RAIZ (fora da pasta modelo)
 session_start();
 

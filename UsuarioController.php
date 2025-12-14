@@ -1,9 +1,9 @@
-﻿<?php
+<?php
 class UsuarioController {
     private $conn;
 
     public function __construct() {
-        require_once 'Connection.php';
+        require_once __DIR__ . '/../config/Connection.php';
         $this->conn = Connection::getInstance();
     }
 
